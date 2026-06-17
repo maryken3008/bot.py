@@ -13,9 +13,6 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 CHANNEL_LINK = "https://t.me/nun0moraised4N76nm"
 SUPPORT_HANDLE = "@NUNO_MORAlS"
 
-# ⚠️ EDIT THIS: replace <USERNAME> and <REPO> with your GitHub
-# username and repo name. Image files go in the root of the repo,
-# main branch. Rename your 4 images to match the names below.
 GITHUB_BASE = "https://raw.githubusercontent.com/<USERNAME>/<REPO>/main/"
 IMAGE_FILES = [
     "image1.jpg",
@@ -25,8 +22,7 @@ IMAGE_FILES = [
 ]
 IMAGE_URLS = [GITHUB_BASE + name for name in IMAGE_FILES]
 
-# Repeat the sequence every 6 hours
-REPEAT_SECONDS = 6 * 60 * 60  # 21600
+REPEAT_SECONDS = 6 * 60 * 60  # 6 hours
 
 # ============================================================
 # Logging
@@ -38,7 +34,7 @@ logging.basicConfig(
 log = logging.getLogger("bot")
 
 # ============================================================
-# Dummy HTTP server (Render Web Service requires an open port)
+# Dummy HTTP server (Railway/Render need an open port)
 # ============================================================
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -53,7 +49,7 @@ class HealthHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def log_message(self, format, *args):
-        return  # silence pings
+        return
 
 def run_health_server():
     port = int(os.environ.get("PORT", 10000))
@@ -91,11 +87,12 @@ HELP_MSG = (
 )
 
 # ============================================================
-# The sequence — runs immediately on /start and every 6h
+# The sequence — fires 1 sec after /start and every 6h after
 # ============================================================
 async def send_sequence(context: ContextTypes.DEFAULT_TYPE):
     chat_id = context.job.chat_id
     bot = context.bot
+    log.info(f"Sending sequence to {chat_id}")
     try:
         # 1. Welcome
         await bot.send_message(chat_id, WELCOME_MSG, parse_mode="Markdown")
@@ -124,11 +121,12 @@ async def send_sequence(context: ContextTypes.DEFAULT_TYPE):
 
         # 5. Help message
         await bot.send_message(chat_id, HELP_MSG)
+        log.info(f"Sequence complete for {chat_id}")
     except Exception as e:
         log.error(f"send_sequence failed for {chat_id}: {e}")
 
 # ============================================================
-# /start handler — schedules the recurring job for this user
+# /start handler
 # ============================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -137,19 +135,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.job_queue is None:
         await context.bot.send_message(
             chat_id,
-            "⚠️ JobQueue not installed. Add [job-queue] to requirements.txt.",
+            "⚠️ JobQueue not installed.",
         )
         return
 
-    # Cancel any previous schedule for this user (so /start twice doesn't duplicate)
+    # Cancel any previous schedule for this user
     for j in context.job_queue.get_jobs_by_name(str(chat_id)):
         j.schedule_removal()
 
-    # Run immediately + repeat every 6h
+    # Run sequence in 1 second + repeat every 6h
+    # (must be `first=1` not `first=0`; PTB treats 0 as "use interval")
     context.job_queue.run_repeating(
         send_sequence,
         interval=REPEAT_SECONDS,
-        first=0,
+        first=1,
         chat_id=chat_id,
         name=str(chat_id),
     )
@@ -160,10 +159,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     token = os.environ.get("BOT_TOKEN")
     if not token:
-        log.critical("BOT_TOKEN env var missing! Set it on Render → Environment.")
+        log.critical("BOT_TOKEN env var missing!")
         return
 
-    # Health server in a background thread (Render needs an open port)
     threading.Thread(target=run_health_server, daemon=True).start()
 
     app = Application.builder().token(token).build()
